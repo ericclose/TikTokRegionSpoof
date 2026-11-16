@@ -1,0 +1,2 @@
+-keep class dev.magisk.tiktokregionspoof.model.** { *; }
+-keepclassmembers class dev.magisk.tiktokregionspoof.model.** { *; }

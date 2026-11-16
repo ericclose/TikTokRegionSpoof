@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TikTok Region Spoof</string>
+    <string name="subtitle_magisk_only">Magisk Root · resetprop Engine</string>
+    <string name="checking_magisk_root">Checking Magisk Root…</string>
+    <string name="refresh">Refresh</string>
+    <string name="inspecting_magisk_details">Inspecting su, resetprop, and module state…</string>
+    <string name="target_region_carrier">Target Region &amp; Carrier</string>
+    <string name="default_preset_summary">🇬🇧 United Kingdom — Vodafone UK (23415)</string>
+    <string name="choose_carrier">Browse 1,565+ Carriers</string>
+    <string name="sim_network_properties">SIM &amp; Network Properties</string>
+    <string name="hint_sim_country_iso">SIM ISO</string>
+    <string name="hint_network_country_iso">Net ISO</string>
+    <string name="hint_sim_mcc_mnc">SIM MCC/MNC</string>
+    <string name="hint_network_mcc_mnc">Net MCC/MNC</string>
+    <string name="hint_sim_carrier_name">SIM Carrier</string>
+    <string name="hint_network_carrier_name">Net Carrier</string>
+    <string name="magisk_root_options">Root &amp; Persistence Options</string>
+
+    <string name="opt_mirror_dual_sim">Mirror Dual-SIM Slots</string>
+    <string name="opt_mirror_dual_sim_desc">Duplicate spoofed values across both SIM slots</string>
+    <string name="opt_spoof_wifi_country">Spoof Wi-Fi Country Code</string>
+    <string name="opt_spoof_wifi_country_desc">Force regulatory domain via cmd wifi</string>
+    <string name="opt_install_magisk_module">Persist via Magisk Module</string>
+    <string name="opt_install_magisk_module_desc">Write system.prop &amp; service.sh in /data/adb/modules</string>
+    <string name="opt_enable_ril_watchdog">Enable RIL Watchdog</string>
+    <string name="opt_enable_ril_watchdog_desc">Guard gsm.* via resetprop -w against baseband resets</string>
+    <string name="opt_spoof_locale">Spoof System Locale</string>
+    <string name="opt_spoof_locale_desc">Override persist.sys.locale &amp; ro.product.locale</string>
+    <string name="hint_locale_tag">Locale Tag (e.g. en-US, ja-JP)</string>
+    <string name="opt_spoof_timezone">Spoof Timezone</string>
+    <string name="opt_spoof_timezone_desc">Override persist.sys.timezone &amp; alarm service</string>
+    <string name="hint_timezone_id">Timezone ID (e.g. America/New_York)</string>
+    <string name="opt_force_stop_tiktok">Force-Stop TikTok on Apply</string>
+    <string name="opt_force_stop_tiktok_desc">Restart target TikTok processes immediately</string>
+    <string name="opt_clear_tiktok_cache">Clear TikTok Cache</string>
+    <string name="opt_clear_tiktok_cache_desc">Wipe cache &amp; code_cache directories on apply</string>
+
+    <string name="apply_spoof">Apply via Magisk Root</string>
+    <string name="verify_state">Verify State</string>
+    <string name="restore_defaults">Restore Default</string>
+    <string name="live_telemetry_verification">Live Telemetry Verification</string>
+    <string name="root_log">Root Log</string>
+    <string name="diagnostics_placeholder">Tap \u0027Verify State\u0027 to inspect TelephonyManager &amp; resetprop.</string>
+    <string name="launch_tiktok">Launch TikTok</string>
+    <string name="select_country_carrier">Select Country &amp; Carrier</string>
+    <string name="search_carrier_hint">Search country, ISO (e.g. US, JP), carrier, or MCC+MNC</string>
+    <string name="vpn_note">Tip: TikTok also checks your public IP. Pair this with a VPN/proxy in the same target country for best results.</string>
+
+    <string name="preset_summary_format">%1$s — %2$s (%3$s)</string>
+    <string name="quick_preset_chip_format">%1$s %2$s</string>
+    <string name="magisk_root_active_format">Magisk Root Active</string>
+    <string name="magisk_root_unavailable">Root Access Not Available</string>
+    <string name="magisk_grant_guide">Modern Magisk no longer shows runtime su prompts. Open Magisk → Superuser, grant access to TikTok Region Spoof, then return here.</string>
+    <string name="open_magisk_app">Open Magisk App</string>
+    <string name="magisk_app_not_found">Magisk app not found (if hidden/repackaged, open it manually and grant Superuser).</string>
+    <string name="magisk_details_format">%1$s  ·  resetprop: %2$s  ·  SIM slots: %3$d  ·  Module: %4$s</string>
+    <string name="status_ready">Ready</string>
+    <string name="status_missing">Missing</string>
+    <string name="module_active">Active</string>
+    <string name="module_disabled">Disabled</string>
+    <string name="module_not_installed">Not Installed</string>
+    <string name="no_tiktok_detected">No TikTok packages detected</string>
+    <string name="diag_effective_format">Effective: TelephonyManager matches target (%1$s)</string>
+    <string name="diag_overridden_format">Warning: resetprop is %1$s, but TelephonyManager reports \u0027%2$s\u0027 (likely overridden by physical SIM). Enable Airplane Mode + Wi-Fi or disable the physical SIM slot.</string>
+    <string name="diag_not_spoofed_format">Not spoofed to %1$s yet (prop=%2$s, TM=%3$s).</string>
+</resources>
