@@ -61,11 +61,8 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.fragment.ktx)
     implementation(libs.material)
     implementation(libs.androidx.recyclerview)
     implementation(libs.kotlinx.coroutines.android)
-    implementation(libs.gson)
     testImplementation(libs.junit)
 }

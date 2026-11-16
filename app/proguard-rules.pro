@@ -1,2 +1,1 @@
--keep class dev.magisk.tiktokregionspoof.model.** { *; }
--keepclassmembers class dev.magisk.tiktokregionspoof.model.** { *; }
+# No reflection-based serialization; R8 default rules apply.

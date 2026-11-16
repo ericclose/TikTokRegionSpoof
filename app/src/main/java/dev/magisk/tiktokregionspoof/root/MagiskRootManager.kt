@@ -177,9 +177,9 @@ object MagiskRootManager {
         val netNum = formatSlotValue(config.networkOperatorMccMnc.trim(), slots)
         val simAlpha = formatSlotValue(config.simOperatorName.trim(), slots)
         val netAlpha = formatSlotValue(config.networkOperatorName.trim(), slots)
-        val simState = formatSlotValue(config.simState.trim(), slots)
-        val phoneType = formatSlotValue(config.phoneType.toString(), slots)
-        val netType = formatSlotValue(config.networkType.trim(), slots)
+        val simState = formatSlotValue("READY", slots)
+        val phoneType = formatSlotValue("1", slots)
+        val netType = formatSlotValue("LTE", slots)
         val roaming = formatSlotValue("false", slots)
 
         val props = buildList {
@@ -202,20 +202,22 @@ object MagiskRootManager {
             }
         }
 
+        val resetpropLookup = "RESETPROP=\$(command -v resetprop || echo 'magisk resetprop')"
+        val propCommands = props.joinToString("\n") { (k, v) ->
+            "\$RESETPROP -n ${shQuote(k)} ${shQuote(v)}"
+        }
+        val wifiLine = if (config.spoofWifiCountry && config.simCountryIso.length == 2) {
+            "cmd wifi force-country-code enabled ${shQuote(config.simCountryIso.uppercase())} >/dev/null 2>&1 || true"
+        } else {
+            ""
+        }
+
         val sb = StringBuilder()
-        sb.appendLine("RESETPROP=$(command -v resetprop || echo 'magisk resetprop')")
+        sb.appendLine(resetpropLookup)
         sb.appendLine("if [ -f ${shQuote("$MODULE_DIR/guard.pid")} ]; then")
         sb.appendLine("  kill \$(cat ${shQuote("$MODULE_DIR/guard.pid")}) >/dev/null 2>&1 || true")
         sb.appendLine("  rm -f ${shQuote("$MODULE_DIR/guard.pid")}")
         sb.appendLine("fi")
-
-        for ((key, value) in props) {
-            sb.appendLine("\$RESETPROP -n ${shQuote(key)} ${shQuote(value)}")
-        }
-
-        if (config.spoofWifiCountry && config.simCountryIso.length == 2) {
-            sb.appendLine("cmd wifi force-country-code enabled ${shQuote(config.simCountryIso.uppercase())} >/dev/null 2>&1 || true")
-        }
 
         if (config.spoofTimezone && config.timezoneId.isNotBlank()) {
             sb.appendLine("settings put global auto_time_zone 0 >/dev/null 2>&1 || true")
@@ -233,23 +235,22 @@ object MagiskRootManager {
                 description=Spoofs SIM/network telephony properties via Magisk resetprop (${config.simCountryIso.uppercase()} / ${config.simOperatorName})
             """.trimIndent()
 
-            val applyLines = props.joinToString("\n") { (k, v) ->
-                "    \$RESETPROP -n ${shQuote(k)} ${shQuote(v)}"
-            }
-            val wifiBootLine = if (config.spoofWifiCountry && config.simCountryIso.length == 2) {
-                "cmd wifi force-country-code enabled ${shQuote(config.simCountryIso.uppercase())} >/dev/null 2>&1 || true"
-            } else {
-                ""
-            }
+            val applyPropsSh = buildString {
+                appendLine("#!/system/bin/sh")
+                appendLine(resetpropLookup)
+                appendLine(propCommands)
+                if (wifiLine.isNotEmpty()) appendLine(wifiLine)
+            }.trimEnd()
 
             val guardScriptContent = """
                 #!/system/bin/sh
-                RESETPROP=${'$'}(command -v resetprop || echo "magisk resetprop")
-                echo ${'$'}${'$'} > ${shQuote("$MODULE_DIR/guard.pid")}
+                MODDIR=${'$'}{0%/*}
+                $resetpropLookup
+                echo ${'$'}${'$'} > "${'$'}MODDIR/guard.pid"
                 while true; do
                   CUR=${'$'}(${'$'}RESETPROP gsm.sim.operator.iso-country 2>/dev/null)
                   if [ "${'$'}CUR" != ${shQuote(simIso)} ]; then
-                $applyLines
+                    sh "${'$'}MODDIR/apply_props.sh"
                   fi
                   ${'$'}RESETPROP -w gsm.sim.operator.iso-country ${shQuote(simIso)} >/dev/null 2>&1 || sleep 5
                 done
@@ -258,11 +259,11 @@ object MagiskRootManager {
             val serviceShContent = """
                 #!/system/bin/sh
                 MODDIR=${'$'}{0%/*}
-                RESETPROP=${'$'}(command -v resetprop || echo "magisk resetprop")
-                ${'$'}RESETPROP -w sys.boot_completed 0 >/dev/null 2>&1 || sleep 10
+                until [ "${'$'}(getprop sys.boot_completed)" = "1" ]; do
+                  sleep 2
+                done
                 sleep 2
-                $applyLines
-                $wifiBootLine
+                sh "${'$'}MODDIR/apply_props.sh"
                 if [ -f "${'$'}MODDIR/guard.pid" ]; then
                   kill ${'$'}(cat "${'$'}MODDIR/guard.pid") >/dev/null 2>&1 || true
                 fi
@@ -277,6 +278,9 @@ object MagiskRootManager {
             sb.appendLine("cat <<'EOF_SYSPROP' > ${shQuote("$MODULE_DIR/system.prop")}")
             sb.appendLine(systemPropContent)
             sb.appendLine("EOF_SYSPROP")
+            sb.appendLine("cat <<'EOF_APPLY' > ${shQuote("$MODULE_DIR/apply_props.sh")}")
+            sb.appendLine(applyPropsSh)
+            sb.appendLine("EOF_APPLY")
             sb.appendLine("cat <<'EOF_GUARD' > ${shQuote("$MODULE_DIR/guard.sh")}")
             sb.appendLine(guardScriptContent)
             sb.appendLine("EOF_GUARD")
@@ -284,18 +288,22 @@ object MagiskRootManager {
             sb.appendLine(serviceShContent)
             sb.appendLine("EOF_SVC")
             sb.appendLine("chmod 0644 ${shQuote("$MODULE_DIR/module.prop")} ${shQuote("$MODULE_DIR/system.prop")}")
-            sb.appendLine("chmod 0755 ${shQuote("$MODULE_DIR/guard.sh")} ${shQuote("$MODULE_DIR/service.sh")}")
+            sb.appendLine("chmod 0755 ${shQuote("$MODULE_DIR/apply_props.sh")} ${shQuote("$MODULE_DIR/guard.sh")} ${shQuote("$MODULE_DIR/service.sh")}")
+            sb.appendLine("sh ${shQuote("$MODULE_DIR/apply_props.sh")}")
 
             if (config.rilGuardLoop) {
                 sb.appendLine("nohup sh ${shQuote("$MODULE_DIR/guard.sh")} >/dev/null 2>&1 &")
             }
+        } else {
+            sb.appendLine(propCommands)
+            if (wifiLine.isNotEmpty()) sb.appendLine(wifiLine)
         }
 
         if (config.forceStopTikTok) {
             for (pkg in installedPackages) {
                 sb.appendLine("am force-stop ${shQuote(pkg.packageName)} >/dev/null 2>&1 || true")
                 if (config.clearTikTokCache) {
-                    sb.appendLine("rm -rf /data/user/0/${pkg.packageName}/cache/* /data/user/0/${pkg.packageName}/code_cache/* >/dev/null 2>&1 || true")
+                    sb.appendLine("rm -rf '/data/user/0/${pkg.packageName}/cache'/* '/data/user/0/${pkg.packageName}/code_cache'/* >/dev/null 2>&1 || true")
                 }
             }
         }

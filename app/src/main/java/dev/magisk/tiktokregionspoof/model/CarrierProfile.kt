@@ -1,9 +1,21 @@
 package dev.magisk.tiktokregionspoof.model
 
 import android.content.Context
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.edit
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import org.json.JSONArray
+import org.json.JSONObject
+
+enum class AppThemeMode(val nightMode: Int) {
+    SYSTEM(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM),
+    LIGHT(AppCompatDelegate.MODE_NIGHT_NO),
+    DARK(AppCompatDelegate.MODE_NIGHT_YES);
+
+    companion object {
+        fun fromOrdinal(index: Int): AppThemeMode =
+            entries.getOrElse(index) { SYSTEM }
+    }
+}
 
 data class CarrierProfile(
     val cc2: String,
@@ -17,23 +29,12 @@ data class CarrierProfile(
 
     val flagEmoji: String
         get() {
-            val code = cc2.uppercase()
-            if (code.length != 2) return "🏳️"
+            val code = cc2.trim().uppercase()
+            if (code.length != 2 || code[0] !in 'A'..'Z' || code[1] !in 'A'..'Z') return "🏳️"
             val first = Character.codePointAt(code, 0) - 'A'.code + 0x1F1E6
             val second = Character.codePointAt(code, 1) - 'A'.code + 0x1F1E6
             return String(Character.toChars(first)) + String(Character.toChars(second))
         }
-
-    val displayTitle: String
-        get() = "$flagEmoji $country — $brand"
-
-    val displaySubtitle: String
-        get() = "ISO: ${cc2.uppercase()} · MCC+MNC: $mccmnc" +
-            if (operator.isNotBlank() && !operator.equals(brand, ignoreCase = true)) {
-                " · $operator"
-            } else {
-                ""
-            }
 }
 
 data class SpoofConfig(
@@ -43,9 +44,6 @@ data class SpoofConfig(
     val networkCountryIso: String = "gb",
     val networkOperatorMccMnc: String = "23415",
     val networkOperatorName: String = "Vodafone UK",
-    val simState: String = "READY",
-    val phoneType: Int = 1,
-    val networkType: String = "LTE",
     val mirrorDualSim: Boolean = true,
     val spoofWifiCountry: Boolean = true,
     val spoofLocale: Boolean = false,
@@ -61,18 +59,69 @@ data class SpoofConfig(
 object SpoofConfigStore {
     private const val PREFS_NAME = "magisk_tiktok_spoof_prefs"
     private const val KEY_CONFIG = "spoof_config_json"
-    private val gson = Gson()
+    private const val KEY_THEME_MODE = "app_theme_mode"
+
+    fun loadThemeMode(context: Context): AppThemeMode {
+        val idx = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getInt(KEY_THEME_MODE, AppThemeMode.SYSTEM.ordinal)
+        return AppThemeMode.fromOrdinal(idx)
+    }
+
+    fun saveThemeMode(context: Context, mode: AppThemeMode) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
+            putInt(KEY_THEME_MODE, mode.ordinal)
+        }
+        AppCompatDelegate.setDefaultNightMode(mode.nightMode)
+    }
 
     fun load(context: Context): SpoofConfig {
         val raw = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             .getString(KEY_CONFIG, null) ?: return SpoofConfig()
-        return runCatching { gson.fromJson(raw, SpoofConfig::class.java) }
-            .getOrDefault(SpoofConfig())
+        val defaults = SpoofConfig()
+        return runCatching {
+            val obj = JSONObject(raw)
+            SpoofConfig(
+                simCountryIso = obj.optString("simCountryIso", defaults.simCountryIso),
+                simOperatorMccMnc = obj.optString("simOperatorMccMnc", defaults.simOperatorMccMnc),
+                simOperatorName = obj.optString("simOperatorName", defaults.simOperatorName),
+                networkCountryIso = obj.optString("networkCountryIso", defaults.networkCountryIso),
+                networkOperatorMccMnc = obj.optString("networkOperatorMccMnc", defaults.networkOperatorMccMnc),
+                networkOperatorName = obj.optString("networkOperatorName", defaults.networkOperatorName),
+                mirrorDualSim = obj.optBoolean("mirrorDualSim", defaults.mirrorDualSim),
+                spoofWifiCountry = obj.optBoolean("spoofWifiCountry", defaults.spoofWifiCountry),
+                spoofLocale = obj.optBoolean("spoofLocale", defaults.spoofLocale),
+                localeTag = obj.optString("localeTag", defaults.localeTag),
+                spoofTimezone = obj.optBoolean("spoofTimezone", defaults.spoofTimezone),
+                timezoneId = obj.optString("timezoneId", defaults.timezoneId),
+                persistMagiskModule = obj.optBoolean("persistMagiskModule", defaults.persistMagiskModule),
+                rilGuardLoop = obj.optBoolean("rilGuardLoop", defaults.rilGuardLoop),
+                forceStopTikTok = obj.optBoolean("forceStopTikTok", defaults.forceStopTikTok),
+                clearTikTokCache = obj.optBoolean("clearTikTokCache", defaults.clearTikTokCache)
+            )
+        }.getOrDefault(defaults)
     }
 
     fun save(context: Context, config: SpoofConfig) {
+        val obj = JSONObject().apply {
+            put("simCountryIso", config.simCountryIso)
+            put("simOperatorMccMnc", config.simOperatorMccMnc)
+            put("simOperatorName", config.simOperatorName)
+            put("networkCountryIso", config.networkCountryIso)
+            put("networkOperatorMccMnc", config.networkOperatorMccMnc)
+            put("networkOperatorName", config.networkOperatorName)
+            put("mirrorDualSim", config.mirrorDualSim)
+            put("spoofWifiCountry", config.spoofWifiCountry)
+            put("spoofLocale", config.spoofLocale)
+            put("localeTag", config.localeTag)
+            put("spoofTimezone", config.spoofTimezone)
+            put("timezoneId", config.timezoneId)
+            put("persistMagiskModule", config.persistMagiskModule)
+            put("rilGuardLoop", config.rilGuardLoop)
+            put("forceStopTikTok", config.forceStopTikTok)
+            put("clearTikTokCache", config.clearTikTokCache)
+        }
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit {
-            putString(KEY_CONFIG, gson.toJson(config))
+            putString(KEY_CONFIG, obj.toString())
         }
     }
 }
@@ -110,7 +159,10 @@ object RegionDefaults {
     )
 
     fun hintsForCountry(cc2: String): Pair<String, String> {
-        val code = cc2.uppercase()
+        val code = cc2.trim().uppercase()
+        if (code.length != 2 || code[0] !in 'A'..'Z' || code[1] !in 'A'..'Z') {
+            return "en-US" to "UTC"
+        }
         return localeByCountry[code] ?: ("en-$code" to "UTC")
     }
 
@@ -126,7 +178,6 @@ object RegionDefaults {
 }
 
 object CarrierRepository {
-    private val gson = Gson()
     private val priorityOrder = listOf("US", "GB", "JP", "KR", "DE", "FR", "CA", "AU", "SG", "TW", "BR")
 
     @Volatile
@@ -137,8 +188,20 @@ object CarrierRepository {
         val json = context.assets.open("mcc_mnc_carriers.json")
             .bufferedReader()
             .use { it.readText() }
-        val type = object : TypeToken<List<CarrierProfile>>() {}.type
-        val all: List<CarrierProfile> = gson.fromJson(json, type)
+        val array = JSONArray(json)
+        val all = ArrayList<CarrierProfile>(array.length())
+        for (i in 0 until array.length()) {
+            val obj = array.getJSONObject(i)
+            all.add(
+                CarrierProfile(
+                    cc2 = obj.optString("cc2"),
+                    country = obj.optString("country"),
+                    mccmnc = obj.optString("mccmnc"),
+                    brand = obj.optString("brand"),
+                    operator = obj.optString("operator")
+                )
+            )
+        }
         val sorted = all.sortedWith(
             compareBy<CarrierProfile> { carrier ->
                 val idx = priorityOrder.indexOf(carrier.cc2.uppercase())
@@ -147,5 +210,82 @@ object CarrierRepository {
         )
         cachedCarriers = sorted
         return sorted
+    }
+}
+
+object CarrierFilterEngine {
+    data class FilterOption(val value: String, val label: String) {
+        override fun toString(): String = label
+    }
+
+    fun matchesCountryFilter(
+        item: CarrierProfile,
+        countryIso: String,
+        countryText: String,
+        allCountriesLabel: String
+    ): Boolean = when {
+        countryIso.isNotEmpty() -> item.cc2.equals(countryIso, ignoreCase = true)
+        countryText.isEmpty() || countryText.equals(allCountriesLabel, ignoreCase = true) -> true
+        else -> item.country.contains(countryText, ignoreCase = true) ||
+            item.cc2.contains(countryText, ignoreCase = true)
+    }
+
+    fun matchesCarrierFilter(
+        item: CarrierProfile,
+        carrierBrand: String,
+        carrierText: String,
+        allCarriersLabel: String
+    ): Boolean = when {
+        carrierBrand.isNotEmpty() -> item.brand.equals(carrierBrand, ignoreCase = true)
+        carrierText.isEmpty() || carrierText.equals(allCarriersLabel, ignoreCase = true) -> true
+        else -> item.brand.contains(carrierText, ignoreCase = true) ||
+            item.operator.contains(carrierText, ignoreCase = true) ||
+            item.mccmnc.contains(carrierText, ignoreCase = true)
+    }
+
+    fun buildCountryOptions(
+        allCarriers: List<CarrierProfile>,
+        carrierBrand: String,
+        carrierText: String,
+        allCountriesLabel: String,
+        allCarriersLabel: String
+    ): List<FilterOption> {
+        val matching = allCarriers.filter {
+            matchesCarrierFilter(it, carrierBrand, carrierText, allCarriersLabel)
+        }
+        return listOf(FilterOption("", allCountriesLabel)) +
+            matching.distinctBy { it.cc2.uppercase() }
+                .sortedBy { it.country }
+                .map { FilterOption(it.cc2.uppercase(), "${it.flagEmoji} ${it.country} (${it.cc2.uppercase()})") }
+    }
+
+    fun buildCarrierOptions(
+        allCarriers: List<CarrierProfile>,
+        countryIso: String,
+        countryText: String,
+        allCountriesLabel: String,
+        allCarriersLabel: String
+    ): List<FilterOption> {
+        val matching = allCarriers.filter {
+            matchesCountryFilter(it, countryIso, countryText, allCountriesLabel)
+        }
+        return listOf(FilterOption("", allCarriersLabel)) +
+            matching.map { it.brand }
+                .distinctBy { it.lowercase() }
+                .sortedBy { it.lowercase() }
+                .map { FilterOption(it, it) }
+    }
+
+    fun filterCarriers(
+        allCarriers: List<CarrierProfile>,
+        countryIso: String,
+        countryText: String,
+        allCountriesLabel: String,
+        carrierBrand: String,
+        carrierText: String,
+        allCarriersLabel: String
+    ): List<CarrierProfile> = allCarriers.filter { item ->
+        matchesCountryFilter(item, countryIso, countryText, allCountriesLabel) &&
+            matchesCarrierFilter(item, carrierBrand, carrierText, allCarriersLabel)
     }
 }

@@ -3,23 +3,31 @@ package dev.magisk.tiktokregionspoof.ui
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Bundle
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.style.ForegroundColorSpan
 import android.text.style.RelativeSizeSpan
+import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.activity.enableEdgeToEdge
-import androidx.core.content.ContextCompat
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
+import androidx.core.content.ContextCompat
+import androidx.core.os.LocaleListCompat
+import androidx.core.widget.NestedScrollView
+import androidx.core.widget.doAfterTextChanged
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.chip.Chip
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.materialswitch.MaterialSwitch
 import com.google.android.material.snackbar.Snackbar
+import com.google.android.material.textfield.TextInputLayout
 import dev.magisk.tiktokregionspoof.R
 import dev.magisk.tiktokregionspoof.databinding.ActivityMainBinding
+import dev.magisk.tiktokregionspoof.model.AppThemeMode
 import dev.magisk.tiktokregionspoof.model.CarrierProfile
 import dev.magisk.tiktokregionspoof.model.RegionDefaults
 import dev.magisk.tiktokregionspoof.model.SpoofConfig
@@ -28,25 +36,94 @@ import dev.magisk.tiktokregionspoof.root.MagiskEnvironment
 import dev.magisk.tiktokregionspoof.root.MagiskRootManager
 import dev.magisk.tiktokregionspoof.root.ModuleStatus
 import dev.magisk.tiktokregionspoof.root.ShellResult
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private var currentEnv: MagiskEnvironment? = null
-    private var lastShellLog: String = "No root commands executed yet."
+    private var lastShellLog: String = ""
+    private var propertiesExpanded = false
+    private var activeTabId = R.id.nav_dashboard
+    private var refreshJob: Job? = null
+    private var isBindingUi = false
+
+    private val dash get() = binding.tabDashboard
+    private val opts get() = binding.tabOptions
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
+        lastShellLog = savedInstanceState?.getString(KEY_SHELL_LOG)
+            ?: getString(R.string.no_root_commands_yet)
 
         setupFragmentResultListener()
         setupQuickPresets()
         setupSwitchLabels()
+        setupAppearanceControls()
         bindConfigToUi(SpoofConfigStore.load(this))
+        setupNavigationAndScroll()
         setupListeners()
+
+        activeTabId = savedInstanceState?.getInt(KEY_ACTIVE_TAB, R.id.nav_dashboard) ?: R.id.nav_dashboard
+        if (activeTabId == R.id.nav_options) {
+            dash.pageDashboard.visibility = View.GONE
+            opts.pageOptions.visibility = View.VISIBLE
+            binding.fabApply.hide()
+            binding.bottomNav.selectedItemId = R.id.nav_options
+        } else {
+            MotionHelper.staggerEnter(
+                listOf(
+                    dash.cardMagiskStatus,
+                    dash.cardRegionPreset,
+                    dash.cardProperties,
+                    dash.cardTelemetry
+                )
+            )
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt(KEY_ACTIVE_TAB, activeTabId)
+        outState.putString(KEY_SHELL_LOG, lastShellLog)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshEnvironment()
+    }
+
+    private fun setupNavigationAndScroll() {
+        binding.bottomNav.setOnItemSelectedListener { item ->
+            activeTabId = item.itemId
+            when (item.itemId) {
+                R.id.nav_dashboard -> {
+                    MotionHelper.animatePageSwitch(dash.pageDashboard, opts.pageOptions)
+                    binding.fabApply.show()
+                    true
+                }
+                R.id.nav_options -> {
+                    MotionHelper.animatePageSwitch(opts.pageOptions, dash.pageDashboard)
+                    binding.fabApply.hide()
+                    true
+                }
+                else -> false
+            }
+        }
+
+        dash.pageDashboard.setOnScrollChangeListener(
+            NestedScrollView.OnScrollChangeListener { _, _, scrollY, _, oldScrollY ->
+                if (scrollY - oldScrollY > 12) {
+                    binding.fabApply.shrink()
+                } else if (oldScrollY - scrollY > 12 || scrollY == 0) {
+                    binding.fabApply.extend()
+                }
+            }
+        )
     }
 
     private fun setupSwitchLabels() {
@@ -65,19 +142,53 @@ class MainActivity : AppCompatActivity() {
                 setSpan(RelativeSizeSpan(0.82f), start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
-        bindSwitch(binding.swMirrorDualSim, R.string.opt_mirror_dual_sim, R.string.opt_mirror_dual_sim_desc)
-        bindSwitch(binding.swSpoofWifiCountry, R.string.opt_spoof_wifi_country, R.string.opt_spoof_wifi_country_desc)
-        bindSwitch(binding.swSpoofLocale, R.string.opt_spoof_locale, R.string.opt_spoof_locale_desc)
-        bindSwitch(binding.swSpoofTimezone, R.string.opt_spoof_timezone, R.string.opt_spoof_timezone_desc)
-        bindSwitch(binding.swPersistModule, R.string.opt_install_magisk_module, R.string.opt_install_magisk_module_desc)
-        bindSwitch(binding.swRilGuard, R.string.opt_enable_ril_watchdog, R.string.opt_enable_ril_watchdog_desc)
-        bindSwitch(binding.swForceStop, R.string.opt_force_stop_tiktok, R.string.opt_force_stop_tiktok_desc)
-        bindSwitch(binding.swClearCache, R.string.opt_clear_tiktok_cache, R.string.opt_clear_tiktok_cache_desc)
+        bindSwitch(opts.swMirrorDualSim, R.string.opt_mirror_dual_sim, R.string.opt_mirror_dual_sim_desc)
+        bindSwitch(opts.swSpoofWifiCountry, R.string.opt_spoof_wifi_country, R.string.opt_spoof_wifi_country_desc)
+        bindSwitch(opts.swSpoofLocale, R.string.opt_spoof_locale, R.string.opt_spoof_locale_desc)
+        bindSwitch(opts.swSpoofTimezone, R.string.opt_spoof_timezone, R.string.opt_spoof_timezone_desc)
+        bindSwitch(opts.swPersistModule, R.string.opt_install_magisk_module, R.string.opt_install_magisk_module_desc)
+        bindSwitch(opts.swRilGuard, R.string.opt_enable_ril_watchdog, R.string.opt_enable_ril_watchdog_desc)
+        bindSwitch(opts.swForceStop, R.string.opt_force_stop_tiktok, R.string.opt_force_stop_tiktok_desc)
+        bindSwitch(opts.swClearCache, R.string.opt_clear_tiktok_cache, R.string.opt_clear_tiktok_cache_desc)
     }
 
-    override fun onResume() {
-        super.onResume()
-        refreshEnvironment()
+    private fun setupAppearanceControls() {
+        val currentThemeBtn = when (SpoofConfigStore.loadThemeMode(this)) {
+            AppThemeMode.SYSTEM -> opts.btnThemeSystem.id
+            AppThemeMode.LIGHT -> opts.btnThemeLight.id
+            AppThemeMode.DARK -> opts.btnThemeDark.id
+        }
+        opts.toggleThemeMode.check(currentThemeBtn)
+        opts.toggleThemeMode.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val nextMode = when (checkedId) {
+                opts.btnThemeLight.id -> AppThemeMode.LIGHT
+                opts.btnThemeDark.id -> AppThemeMode.DARK
+                else -> AppThemeMode.SYSTEM
+            }
+            if (nextMode != SpoofConfigStore.loadThemeMode(this)) {
+                SpoofConfigStore.saveThemeMode(this, nextMode)
+            }
+        }
+
+        val currentTags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+        val currentLangBtn = when {
+            currentTags.startsWith("zh") -> opts.btnLangZh.id
+            currentTags.startsWith("en") -> opts.btnLangEn.id
+            else -> opts.btnLangSystem.id
+        }
+        opts.toggleLanguage.check(currentLangBtn)
+        opts.toggleLanguage.addOnButtonCheckedListener { _, checkedId, isChecked ->
+            if (!isChecked) return@addOnButtonCheckedListener
+            val targetLocales = when (checkedId) {
+                opts.btnLangEn.id -> LocaleListCompat.forLanguageTags("en")
+                opts.btnLangZh.id -> LocaleListCompat.forLanguageTags("zh-CN")
+                else -> LocaleListCompat.getEmptyLocaleList()
+            }
+            if (AppCompatDelegate.getApplicationLocales() != targetLocales) {
+                AppCompatDelegate.setApplicationLocales(targetLocales)
+            }
+        }
     }
 
     private fun setupFragmentResultListener() {
@@ -96,124 +207,211 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun createTagChip(
+        label: String,
+        cornerPx: Float? = null,
+        tagValue: Any? = null,
+        onClick: ((View) -> Unit)? = null
+    ): Chip = Chip(this).apply {
+        text = label
+        tag = tagValue
+        chipStrokeWidth = 0f
+        if (cornerPx != null) {
+            shapeAppearanceModel = shapeAppearanceModel.toBuilder()
+                .setAllCornerSizes(cornerPx)
+                .build()
+        }
+        if (onClick != null) {
+            setOnClickListener(onClick)
+        } else {
+            isClickable = false
+        }
+    }
+
     private fun setupQuickPresets() {
-        binding.chipGroupQuickPresets.removeAllViews()
+        dash.chipGroupQuickPresets.removeAllViews()
+        val cornerPx = 16f * resources.displayMetrics.density
         RegionDefaults.quickPresets.forEach { preset ->
-            val chip = Chip(this).apply {
-                text = getString(R.string.quick_preset_chip_format, preset.flagEmoji, preset.cc2)
-                setOnClickListener { applyCarrierToFields(preset) }
+            val chip = createTagChip(
+                label = getString(R.string.quick_preset_chip_format, preset.flagEmoji, preset.cc2),
+                cornerPx = cornerPx,
+                tagValue = preset.isoLower
+            ) {
+                it.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                applyCarrierToFields(preset)
             }
-            binding.chipGroupQuickPresets.addView(chip)
+            dash.chipGroupQuickPresets.addView(chip)
+        }
+        updateQuickPresetSelection(SpoofConfigStore.load(this).simCountryIso)
+    }
+
+    private fun updateQuickPresetSelection(activeIso: String) {
+        val selectedBg = android.content.res.ColorStateList.valueOf(
+            MaterialColors.getColor(
+                dash.chipGroupQuickPresets,
+                com.google.android.material.R.attr.colorPrimaryContainer
+            )
+        )
+        val selectedText = MaterialColors.getColor(
+            dash.chipGroupQuickPresets,
+            com.google.android.material.R.attr.colorOnPrimaryContainer
+        )
+        val normalBg = android.content.res.ColorStateList.valueOf(
+            MaterialColors.getColor(
+                dash.chipGroupQuickPresets,
+                com.google.android.material.R.attr.colorSurfaceContainerHigh
+            )
+        )
+        val normalText = MaterialColors.getColor(
+            dash.chipGroupQuickPresets,
+            com.google.android.material.R.attr.colorOnSurface
+        )
+        val target = activeIso.lowercase()
+        for (i in 0 until dash.chipGroupQuickPresets.childCount) {
+            val chip = dash.chipGroupQuickPresets.getChildAt(i) as? Chip ?: continue
+            val isSelected = (chip.tag as? String) == target
+            chip.chipBackgroundColor = if (isSelected) selectedBg else normalBg
+            chip.setTextColor(if (isSelected) selectedText else normalText)
         }
     }
 
     private fun applyCarrierToFields(picked: CarrierProfile) {
-        binding.etSimCountryIso.setText(picked.isoLower)
-        binding.etNetCountryIso.setText(picked.isoLower)
-        binding.etSimMccMnc.setText(picked.mccmnc)
-        binding.etNetMccMnc.setText(picked.mccmnc)
-        binding.etSimOperatorName.setText(picked.brand)
-        binding.etNetOperatorName.setText(picked.brand)
+        dash.etSimCountryIso.setText(picked.isoLower)
+        dash.etNetCountryIso.setText(picked.isoLower)
+        dash.etSimMccMnc.setText(picked.mccmnc)
+        dash.etNetMccMnc.setText(picked.mccmnc)
+        dash.etSimOperatorName.setText(picked.brand)
+        dash.etNetOperatorName.setText(picked.brand)
         clearFieldErrors()
 
         val (localeHint, tzHint) = RegionDefaults.hintsForCountry(picked.cc2)
-        binding.etLocaleTag.setText(localeHint)
-        binding.etTimezoneId.setText(tzHint)
-        binding.tvSelectedPreset.text = getString(
+        opts.etLocaleTag.setText(localeHint)
+        opts.etTimezoneId.setText(tzHint)
+        dash.tvSelectedPreset.text = getString(
             R.string.preset_summary_format,
             "${picked.flagEmoji} ${picked.country}",
             picked.brand,
             picked.mccmnc
         )
+        updateQuickPresetSelection(picked.isoLower)
     }
 
     private fun bindConfigToUi(cfg: SpoofConfig) {
-        binding.etSimCountryIso.setText(cfg.simCountryIso)
-        binding.etNetCountryIso.setText(cfg.networkCountryIso)
-        binding.etSimMccMnc.setText(cfg.simOperatorMccMnc)
-        binding.etNetMccMnc.setText(cfg.networkOperatorMccMnc)
-        binding.etSimOperatorName.setText(cfg.simOperatorName)
-        binding.etNetOperatorName.setText(cfg.networkOperatorName)
+        isBindingUi = true
+        try {
+            dash.etSimCountryIso.setText(cfg.simCountryIso)
+            dash.etNetCountryIso.setText(cfg.networkCountryIso)
+            dash.etSimMccMnc.setText(cfg.simOperatorMccMnc)
+            dash.etNetMccMnc.setText(cfg.networkOperatorMccMnc)
+            dash.etSimOperatorName.setText(cfg.simOperatorName)
+            dash.etNetOperatorName.setText(cfg.networkOperatorName)
 
-        binding.swMirrorDualSim.isChecked = cfg.mirrorDualSim
-        binding.swSpoofWifiCountry.isChecked = cfg.spoofWifiCountry
-        binding.swPersistModule.isChecked = cfg.persistMagiskModule
-        binding.swRilGuard.isChecked = cfg.rilGuardLoop
-        binding.swRilGuard.isEnabled = cfg.persistMagiskModule
+            opts.swMirrorDualSim.isChecked = cfg.mirrorDualSim
+            opts.swSpoofWifiCountry.isChecked = cfg.spoofWifiCountry
+            opts.swPersistModule.isChecked = cfg.persistMagiskModule
+            opts.swRilGuard.isChecked = cfg.rilGuardLoop
+            opts.swRilGuard.isEnabled = cfg.persistMagiskModule
 
-        binding.swSpoofLocale.isChecked = cfg.spoofLocale
-        binding.etLocaleTag.setText(cfg.localeTag)
-        binding.tilLocaleTag.visibility = if (cfg.spoofLocale) View.VISIBLE else View.GONE
+            opts.swSpoofLocale.isChecked = cfg.spoofLocale
+            opts.etLocaleTag.setText(cfg.localeTag)
+            opts.tilLocaleTag.visibility = if (cfg.spoofLocale) View.VISIBLE else View.GONE
 
-        binding.swSpoofTimezone.isChecked = cfg.spoofTimezone
-        binding.etTimezoneId.setText(cfg.timezoneId)
-        binding.tilTimezoneId.visibility = if (cfg.spoofTimezone) View.VISIBLE else View.GONE
+            opts.swSpoofTimezone.isChecked = cfg.spoofTimezone
+            opts.etTimezoneId.setText(cfg.timezoneId)
+            opts.tilTimezoneId.visibility = if (cfg.spoofTimezone) View.VISIBLE else View.GONE
 
-        binding.swForceStop.isChecked = cfg.forceStopTikTok
-        binding.swClearCache.isChecked = cfg.clearTikTokCache
-        binding.tvSelectedPreset.text = getString(
-            R.string.preset_summary_format,
-            cfg.simCountryIso.uppercase(),
-            cfg.simOperatorName,
-            cfg.simOperatorMccMnc
-        )
+            opts.swForceStop.isChecked = cfg.forceStopTikTok
+            opts.swClearCache.isChecked = cfg.clearTikTokCache
+            val flag = CarrierProfile(cfg.simCountryIso, "", "", "", "").flagEmoji
+            dash.tvSelectedPreset.text = getString(
+                R.string.preset_summary_format,
+                "$flag ${cfg.simCountryIso.uppercase()}",
+                cfg.simOperatorName,
+                cfg.simOperatorMccMnc
+            )
+            updateQuickPresetSelection(cfg.simCountryIso)
+        } finally {
+            isBindingUi = false
+        }
     }
 
-    private fun readConfigFromUi(): SpoofConfig {
-        val previous = SpoofConfigStore.load(this)
-        return previous.copy(
-            simCountryIso = binding.etSimCountryIso.text?.toString()?.trim().orEmpty().lowercase(),
-            networkCountryIso = binding.etNetCountryIso.text?.toString()?.trim().orEmpty().lowercase(),
-            simOperatorMccMnc = binding.etSimMccMnc.text?.toString()?.trim().orEmpty(),
-            networkOperatorMccMnc = binding.etNetMccMnc.text?.toString()?.trim().orEmpty(),
-            simOperatorName = binding.etSimOperatorName.text?.toString()?.trim().orEmpty(),
-            networkOperatorName = binding.etNetOperatorName.text?.toString()?.trim().orEmpty(),
-            mirrorDualSim = binding.swMirrorDualSim.isChecked,
-            spoofWifiCountry = binding.swSpoofWifiCountry.isChecked,
-            persistMagiskModule = binding.swPersistModule.isChecked,
-            rilGuardLoop = binding.swRilGuard.isChecked,
-            spoofLocale = binding.swSpoofLocale.isChecked,
-            localeTag = binding.etLocaleTag.text?.toString()?.trim().orEmpty(),
-            spoofTimezone = binding.swSpoofTimezone.isChecked,
-            timezoneId = binding.etTimezoneId.text?.toString()?.trim().orEmpty(),
-            forceStopTikTok = binding.swForceStop.isChecked,
-            clearTikTokCache = binding.swClearCache.isChecked
-        )
+    private fun saveCurrentConfig() {
+        if (isBindingUi) return
+        SpoofConfigStore.save(this, readConfigFromUi())
     }
+
+    private fun readConfigFromUi(): SpoofConfig = SpoofConfig(
+        simCountryIso = dash.etSimCountryIso.text?.toString()?.trim().orEmpty().lowercase(),
+        networkCountryIso = dash.etNetCountryIso.text?.toString()?.trim().orEmpty().lowercase(),
+        simOperatorMccMnc = dash.etSimMccMnc.text?.toString()?.trim().orEmpty(),
+        networkOperatorMccMnc = dash.etNetMccMnc.text?.toString()?.trim().orEmpty(),
+        simOperatorName = dash.etSimOperatorName.text?.toString()?.trim().orEmpty(),
+        networkOperatorName = dash.etNetOperatorName.text?.toString()?.trim().orEmpty(),
+        mirrorDualSim = opts.swMirrorDualSim.isChecked,
+        spoofWifiCountry = opts.swSpoofWifiCountry.isChecked,
+        persistMagiskModule = opts.swPersistModule.isChecked,
+        rilGuardLoop = opts.swRilGuard.isChecked,
+        spoofLocale = opts.swSpoofLocale.isChecked,
+        localeTag = opts.etLocaleTag.text?.toString()?.trim().orEmpty(),
+        spoofTimezone = opts.swSpoofTimezone.isChecked,
+        timezoneId = opts.etTimezoneId.text?.toString()?.trim().orEmpty(),
+        forceStopTikTok = opts.swForceStop.isChecked,
+        clearTikTokCache = opts.swClearCache.isChecked
+    )
 
     private fun clearFieldErrors() {
-        binding.tilSimCountryIso.error = null
-        binding.tilNetCountryIso.error = null
-        binding.tilSimMccMnc.error = null
-        binding.tilNetMccMnc.error = null
+        dash.tilSimCountryIso.error = null
+        dash.tilNetCountryIso.error = null
+        dash.tilSimMccMnc.error = null
+        dash.tilNetMccMnc.error = null
     }
 
     private fun validateConfig(cfg: SpoofConfig): Boolean {
         clearFieldErrors()
         var valid = true
         if (cfg.simCountryIso.length != 2 || !cfg.simCountryIso.all { it.isLetter() }) {
-            binding.tilSimCountryIso.error = "2-letter ISO (e.g. us)"
+            dash.tilSimCountryIso.error = getString(R.string.err_iso_format)
             valid = false
         }
         if (cfg.networkCountryIso.length != 2 || !cfg.networkCountryIso.all { it.isLetter() }) {
-            binding.tilNetCountryIso.error = "2-letter ISO (e.g. us)"
+            dash.tilNetCountryIso.error = getString(R.string.err_iso_format)
             valid = false
         }
         if (cfg.simOperatorMccMnc.length < 5 || !cfg.simOperatorMccMnc.all { it.isDigit() }) {
-            binding.tilSimMccMnc.error = "5-6 digits"
+            dash.tilSimMccMnc.error = getString(R.string.err_mccmnc_format)
             valid = false
         }
         if (cfg.networkOperatorMccMnc.length < 5 || !cfg.networkOperatorMccMnc.all { it.isDigit() }) {
-            binding.tilNetMccMnc.error = "5-6 digits"
+            dash.tilNetMccMnc.error = getString(R.string.err_mccmnc_format)
             valid = false
+        }
+        if (!valid && !propertiesExpanded) {
+            togglePropertiesSection(forceExpand = true)
         }
         return valid
     }
 
-    private fun setupListeners() {
-        binding.btnRefreshEnv.setOnClickListener { refreshEnvironment() }
+    private fun togglePropertiesSection(forceExpand: Boolean? = null) {
+        val next = forceExpand ?: !propertiesExpanded
+        if (next == propertiesExpanded) return
+        propertiesExpanded = next
+        MotionHelper.beginContainerTransition(dash.dashboardColumn)
+        dash.layoutPropertiesContent.visibility = if (next) View.VISIBLE else View.GONE
+        MotionHelper.rotateChevron(dash.ivPropertiesChevron, next)
+    }
 
-        binding.btnOpenMagisk.setOnClickListener {
+    private fun setupListeners() {
+        dash.btnRefreshEnv.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            refreshEnvironment()
+        }
+
+        dash.headerProperties.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            togglePropertiesSection()
+        }
+
+        dash.btnOpenMagisk.setOnClickListener {
             val intent = packageManager.getLaunchIntentForPackage(MAGISK_PACKAGE)
             if (intent != null) {
                 startActivity(intent)
@@ -222,26 +420,48 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        binding.btnChooseCarrier.setOnClickListener {
-            CarrierPickerBottomSheet.newInstance()
+        dash.btnChooseCarrier.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            CarrierPickerBottomSheet()
                 .show(supportFragmentManager, CarrierPickerBottomSheet.TAG)
         }
 
-        binding.swPersistModule.setOnCheckedChangeListener { _, checked ->
-            binding.swRilGuard.isEnabled = checked
+        opts.swPersistModule.setOnCheckedChangeListener { _, checked ->
+            opts.swRilGuard.isEnabled = checked
+            saveCurrentConfig()
         }
 
-        binding.swSpoofLocale.setOnCheckedChangeListener { _, checked ->
-            binding.tilLocaleTag.visibility = if (checked) View.VISIBLE else View.GONE
+        fun bindConditionalInput(sw: MaterialSwitch, til: TextInputLayout) {
+            sw.setOnCheckedChangeListener { _, checked ->
+                MotionHelper.beginContainerTransition(opts.optionsColumn)
+                til.visibility = if (checked) View.VISIBLE else View.GONE
+                saveCurrentConfig()
+            }
         }
+        bindConditionalInput(opts.swSpoofLocale, opts.tilLocaleTag)
+        bindConditionalInput(opts.swSpoofTimezone, opts.tilTimezoneId)
 
-        binding.swSpoofTimezone.setOnCheckedChangeListener { _, checked ->
-            binding.tilTimezoneId.visibility = if (checked) View.VISIBLE else View.GONE
+        listOf(
+            opts.swMirrorDualSim,
+            opts.swSpoofWifiCountry,
+            opts.swRilGuard,
+            opts.swForceStop,
+            opts.swClearCache
+        ).forEach { sw ->
+            sw.setOnCheckedChangeListener { _, _ -> saveCurrentConfig() }
         }
+        opts.etLocaleTag.doAfterTextChanged { saveCurrentConfig() }
+        opts.etTimezoneId.doAfterTextChanged { saveCurrentConfig() }
 
-        binding.btnApply.setOnClickListener {
+        binding.fabApply.setOnClickListener { v ->
             val cfg = readConfigFromUi()
             if (!validateConfig(cfg)) return@setOnClickListener
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                v.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+            } else {
+                v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            }
 
             SpoofConfigStore.save(this, cfg)
             setActionsEnabled(false)
@@ -249,7 +469,7 @@ class MainActivity : AppCompatActivity() {
                 val env = currentEnv ?: MagiskRootManager.inspectEnvironment(this@MainActivity)
                 if (!env.hasRoot) {
                     setActionsEnabled(true)
-                    showMessage("Magisk Root (su) is required but not granted.")
+                    showMessage(getString(R.string.msg_root_required))
                     return@launch
                 }
                 val result = MagiskRootManager.applySpoof(
@@ -260,61 +480,86 @@ class MainActivity : AppCompatActivity() {
                 recordShellLog("applySpoof (${cfg.simCountryIso.uppercase()})", result)
                 setActionsEnabled(true)
                 if (result.isSuccess) {
-                    showMessage("Applied via Magisk resetprop (${cfg.simCountryIso.uppercase()}).")
+                    val snack = Snackbar.make(
+                        binding.rootCoordinator,
+                        getString(R.string.msg_applied_format, cfg.simCountryIso.uppercase()),
+                        Snackbar.LENGTH_LONG
+                    )
+                    if (env.installedTikTokPackages.isNotEmpty()) {
+                        snack.setAction(R.string.action_launch) { launchTikTokFlow() }
+                    }
+                    snack.show()
                     refreshEnvironment()
                     verifyLiveDiagnostics()
                 } else {
-                    showMessage("Failed (exit ${result.exitCode}). Tap 'Root Log' for details.")
+                    showMessage(getString(R.string.msg_apply_failed_format, result.exitCode))
                 }
             }
         }
 
-        binding.btnVerify.setOnClickListener { verifyLiveDiagnostics() }
-
-        binding.btnRestore.setOnClickListener {
-            setActionsEnabled(false)
-            lifecycleScope.launch {
-                val env = currentEnv ?: MagiskRootManager.inspectEnvironment(this@MainActivity)
-                val result = MagiskRootManager.restoreDefaults(env.installedTikTokPackages)
-                recordShellLog("restoreDefaults", result)
-                setActionsEnabled(true)
-                if (result.isSuccess) {
-                    showMessage("Magisk module removed. Reboot device to restore original baseband props.")
-                    refreshEnvironment()
-                    verifyLiveDiagnostics()
-                } else {
-                    showMessage("Restore failed. Tap 'Root Log' for details.")
-                }
-            }
+        dash.btnVerify.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+            verifyLiveDiagnostics()
         }
 
-        binding.btnViewRootLog.setOnClickListener {
+        dash.btnRestore.setOnClickListener {
+            it.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
             MaterialAlertDialogBuilder(this)
-                .setTitle("Magisk Root Execution Log")
-                .setMessage(lastShellLog)
-                .setPositiveButton("Copy") { _, _ ->
-                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("MagiskRootLog", lastShellLog))
-                    showMessage("Log copied to clipboard.")
-                }
-                .setNegativeButton("Close", null)
+                .setTitle(R.string.confirm_restore_title)
+                .setMessage(R.string.confirm_restore_message)
+                .setPositiveButton(R.string.action_restore) { _, _ -> performRestoreDefaults() }
+                .setNegativeButton(R.string.action_cancel, null)
                 .show()
         }
 
-        binding.btnLaunchTikTok.setOnClickListener {
-            val installed = currentEnv?.installedTikTokPackages.orEmpty()
-            when {
-                installed.isEmpty() -> showMessage("No TikTok packages installed.")
-                installed.size == 1 -> launchPackage(installed.first().packageName)
-                else -> {
-                    val labels = installed.map { it.label }.toTypedArray()
-                    MaterialAlertDialogBuilder(this)
-                        .setTitle("Launch TikTok")
-                        .setItems(labels) { _, which ->
-                            launchPackage(installed[which].packageName)
-                        }
-                        .show()
+        dash.btnViewRootLog.setOnClickListener {
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.dialog_root_log_title)
+                .setMessage(lastShellLog)
+                .setPositiveButton(R.string.action_copy) { _, _ ->
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("MagiskRootLog", lastShellLog))
+                    showMessage(getString(R.string.msg_log_copied))
                 }
+                .setNegativeButton(R.string.action_close, null)
+                .show()
+        }
+
+        dash.btnLaunchTikTok.setOnClickListener {
+            launchTikTokFlow()
+        }
+    }
+
+    private fun performRestoreDefaults() {
+        setActionsEnabled(false)
+        lifecycleScope.launch {
+            val env = currentEnv ?: MagiskRootManager.inspectEnvironment(this@MainActivity)
+            val result = MagiskRootManager.restoreDefaults(env.installedTikTokPackages)
+            recordShellLog("restoreDefaults", result)
+            setActionsEnabled(true)
+            if (result.isSuccess) {
+                showMessage(getString(R.string.msg_restored))
+                refreshEnvironment()
+                verifyLiveDiagnostics()
+            } else {
+                showMessage(getString(R.string.msg_restore_failed))
+            }
+        }
+    }
+
+    private fun launchTikTokFlow() {
+        val installed = currentEnv?.installedTikTokPackages.orEmpty()
+        when {
+            installed.isEmpty() -> showMessage(getString(R.string.msg_no_tiktok))
+            installed.size == 1 -> launchPackage(installed.first().packageName)
+            else -> {
+                val labels = installed.map { it.label }.toTypedArray()
+                MaterialAlertDialogBuilder(this)
+                    .setTitle(R.string.launch_tiktok)
+                    .setItems(labels) { _, which ->
+                        launchPackage(installed[which].packageName)
+                    }
+                    .show()
             }
         }
     }
@@ -324,7 +569,7 @@ class MainActivity : AppCompatActivity() {
         if (intent != null) {
             startActivity(intent)
         } else {
-            showMessage("Unable to launch $packageName")
+            showMessage(getString(R.string.msg_unable_launch_format, packageName))
         }
     }
 
@@ -340,11 +585,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshEnvironment() {
-        lifecycleScope.launch {
+        refreshJob?.cancel()
+        refreshJob = lifecycleScope.launch {
             val env = MagiskRootManager.inspectEnvironment(this@MainActivity)
             currentEnv = env
 
-            binding.tvMagiskStatusTitle.text = getString(
+            dash.tvMagiskStatusTitle.text = getString(
                 if (env.hasRoot) R.string.magisk_root_active_format else R.string.magisk_root_unavailable
             )
             val cardColorAttr = if (env.hasRoot) {
@@ -357,122 +603,106 @@ class MainActivity : AppCompatActivity() {
             } else {
                 com.google.android.material.R.attr.colorOnErrorContainer
             }
-            binding.cardMagiskStatus.setCardBackgroundColor(
-                MaterialColors.getColor(binding.cardMagiskStatus, cardColorAttr)
+            val onCardColor = MaterialColors.getColor(dash.cardMagiskStatus, iconColorAttr)
+            MotionHelper.animateCardColor(
+                dash.cardMagiskStatus,
+                MaterialColors.getColor(dash.cardMagiskStatus, cardColorAttr)
             )
-            binding.ivMagiskIcon.setColorFilter(
-                MaterialColors.getColor(binding.ivMagiskIcon, iconColorAttr)
-            )
+            dash.ivMagiskIcon.setColorFilter(onCardColor)
+            dash.tvMagiskStatusTitle.setTextColor(onCardColor)
+            dash.tvMagiskDetails.setTextColor(onCardColor)
+            dash.tvMagiskGuidance.setTextColor(onCardColor)
+            dash.btnRefreshEnv.iconTint = android.content.res.ColorStateList.valueOf(onCardColor)
+            MotionHelper.beginContainerTransition(dash.dashboardColumn)
             val missingRootVisibility = if (env.hasRoot) View.GONE else View.VISIBLE
-            binding.tvMagiskGuidance.visibility = missingRootVisibility
-            binding.btnOpenMagisk.visibility = missingRootVisibility
+            dash.tvMagiskDetails.visibility = if (env.hasRoot) View.VISIBLE else View.GONE
+            dash.tvMagiskGuidance.visibility = missingRootVisibility
+            dash.btnOpenMagisk.visibility = missingRootVisibility
 
-            val modText = when (env.moduleStatus) {
-                ModuleStatus.ACTIVE -> getString(R.string.module_active)
-                ModuleStatus.DISABLED -> getString(R.string.module_disabled)
-                ModuleStatus.NOT_INSTALLED -> getString(R.string.module_not_installed)
-            }
-            val resetpropState = getString(
-                if (env.hasResetprop) R.string.status_ready else R.string.status_missing
-            )
-            val versionLabel = if (env.hasRoot) env.magiskVersion else getString(R.string.status_missing)
-            binding.tvMagiskDetails.text = getString(
-                R.string.magisk_details_format,
-                versionLabel,
-                resetpropState,
-                env.simSlotCount,
-                modText
-            )
-
-            binding.chipGroupTikTokApps.removeAllViews()
-            if (env.installedTikTokPackages.isEmpty()) {
-                binding.btnLaunchTikTok.visibility = View.GONE
-                val chip = Chip(this@MainActivity).apply {
-                    text = getString(R.string.no_tiktok_detected)
-                    isClickable = false
+            if (env.hasRoot) {
+                val modText = when (env.moduleStatus) {
+                    ModuleStatus.ACTIVE -> getString(R.string.module_active)
+                    ModuleStatus.DISABLED -> getString(R.string.module_disabled)
+                    ModuleStatus.NOT_INSTALLED -> getString(R.string.module_not_installed)
                 }
-                binding.chipGroupTikTokApps.addView(chip)
+                dash.tvMagiskDetails.text = getString(
+                    R.string.magisk_details_format,
+                    env.magiskVersion,
+                    env.simSlotCount,
+                    modText
+                )
+            }
+
+            dash.chipGroupTikTokApps.removeAllViews()
+            if (env.installedTikTokPackages.isEmpty()) {
+                dash.btnLaunchTikTok.visibility = View.GONE
+                dash.chipGroupTikTokApps.addView(createTagChip(getString(R.string.no_tiktok_detected)))
             } else {
-                binding.btnLaunchTikTok.visibility = View.VISIBLE
+                dash.btnLaunchTikTok.visibility = View.VISIBLE
                 env.installedTikTokPackages.forEach { pkg ->
-                    val chip = Chip(this@MainActivity).apply {
-                        text = pkg.label
-                        isClickable = false
-                    }
-                    binding.chipGroupTikTokApps.addView(chip)
+                    dash.chipGroupTikTokApps.addView(createTagChip(pkg.label))
                 }
             }
         }
     }
 
     private fun verifyLiveDiagnostics() {
-        val targetIso = binding.etSimCountryIso.text?.toString()?.trim().orEmpty().lowercase()
+        val targetIso = dash.etSimCountryIso.text?.toString()?.trim().orEmpty().lowercase()
         lifecycleScope.launch {
             val diag = MagiskRootManager.readLiveDiagnostics(this@MainActivity)
 
             val propMatches = diag.propSimCountry.lowercase().split(",").any { it == targetIso }
             val tmMatches = diag.tmSimCountry.lowercase() == targetIso
 
-            binding.tvDiagnosticsSummary.visibility = View.VISIBLE
+            MotionHelper.beginContainerTransition(dash.dashboardColumn)
+            dash.tvDiagnosticsSummary.visibility = View.VISIBLE
             when {
                 tmMatches && propMatches -> {
-                    binding.tvDiagnosticsSummary.text = getString(
+                    dash.tvDiagnosticsSummary.text = getString(
                         R.string.diag_effective_format,
                         targetIso.uppercase()
                     )
-                    binding.tvDiagnosticsSummary.setTextColor(
+                    dash.tvDiagnosticsSummary.setTextColor(
                         ContextCompat.getColor(this@MainActivity, R.color.status_ok)
                     )
                 }
                 propMatches && !tmMatches -> {
-                    binding.tvDiagnosticsSummary.text = getString(
+                    dash.tvDiagnosticsSummary.text = getString(
                         R.string.diag_overridden_format,
                         targetIso.uppercase(),
                         diag.tmSimCountry.uppercase()
                     )
-                    binding.tvDiagnosticsSummary.setTextColor(
+                    dash.tvDiagnosticsSummary.setTextColor(
                         ContextCompat.getColor(this@MainActivity, R.color.status_warn)
                     )
                 }
                 else -> {
-                    binding.tvDiagnosticsSummary.text = getString(
+                    dash.tvDiagnosticsSummary.text = getString(
                         R.string.diag_not_spoofed_format,
                         targetIso.uppercase(),
                         diag.propSimCountry,
                         diag.tmSimCountry
                     )
-                    binding.tvDiagnosticsSummary.setTextColor(
+                    dash.tvDiagnosticsSummary.setTextColor(
                         ContextCompat.getColor(this@MainActivity, R.color.status_warn)
                     )
                 }
             }
 
-            binding.tvDiagnosticsOutput.text = buildString {
-                appendLine("[TelephonyManager API]")
-                appendLine("simCountryIso     : ${diag.tmSimCountry}")
-                appendLine("networkCountryIso : ${diag.tmNetworkCountry}")
-                appendLine("simOperator       : ${diag.tmSimOperator} (${diag.tmSimOperatorName})")
-                appendLine("networkOperator   : ${diag.tmNetworkOperator} (${diag.tmNetworkOperatorName})")
-                appendLine()
-                appendLine("[Magisk resetprop]")
-                appendLine("gsm.sim.operator.iso-country : ${diag.propSimCountry}")
-                appendLine("gsm.operator.iso-country     : ${diag.propNetworkCountry}")
-                appendLine("gsm.sim.operator.numeric     : ${diag.propSimOperator}")
-                appendLine("gsm.operator.numeric         : ${diag.propNetworkOperator}")
-                appendLine("gsm.sim.operator.alpha       : ${diag.propSimOperatorName}")
-                appendLine("gsm.operator.alpha           : ${diag.propNetworkOperatorName}")
-                appendLine()
-                appendLine("[Locale & Timezone]")
-                appendLine("Locale   : ${diag.activeLocale}")
-                append("Timezone : ${diag.activeTimezone}")
+            dash.tvDiagnosticsOutput.text = buildString {
+                appendLine(getString(R.string.telemetry_sim_format, diag.tmSimCountry, diag.propSimCountry))
+                appendLine(getString(R.string.telemetry_net_format, diag.tmNetworkCountry, diag.propNetworkCountry))
+                appendLine(getString(R.string.telemetry_op_format, diag.tmSimOperator, diag.tmSimOperatorName))
+                append(getString(R.string.telemetry_sys_format, diag.activeLocale, diag.activeTimezone))
             }
         }
     }
 
     private fun setActionsEnabled(enabled: Boolean) {
-        binding.btnApply.isEnabled = enabled
-        binding.btnVerify.isEnabled = enabled
-        binding.btnRestore.isEnabled = enabled
+        binding.fabApply.isEnabled = enabled
+        binding.fabApply.setText(if (enabled) R.string.fab_apply else R.string.fab_applying)
+        dash.btnVerify.isEnabled = enabled
+        dash.btnRestore.isEnabled = enabled
     }
 
     private fun showMessage(msg: String) {
@@ -481,5 +711,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val MAGISK_PACKAGE = "com.topjohnwu.magisk"
+        private const val KEY_ACTIVE_TAB = "active_tab_id"
+        private const val KEY_SHELL_LOG = "shell_log"
     }
 }
