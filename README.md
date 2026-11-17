@@ -35,7 +35,7 @@ flowchart LR
 | :--- | :--- |
 | **SIM & Network** | `gsm.sim.operator.iso-country`, `gsm.operator.iso-country`, `gsm.sim.operator.numeric`, `gsm.operator.numeric`, `gsm.sim.operator.alpha`, `gsm.operator.alpha`, `gsm.sim.state`, `gsm.current.phone-type`, `gsm.network.type`, `gsm.operator.isroaming` |
 | **Optional OS Hints** | `cmd wifi force-country-code`, `persist.sys.locale`, `ro.product.locale`, `persist.sys.timezone`, `service call alarm 3` |
-| **TikTok Packages** | `com.zhiliaoapp.musically`, `com.ss.android.ugc.trill`, `com.zhiliaoapp.musically.go`, `com.ss.android.ugc.aweme`, `com.tiktok.business` |
+| **TikTok Package** | `com.zhiliaoapp.musically` (TikTok Global) |
 
 ---
 

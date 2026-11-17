@@ -24,13 +24,26 @@ enum class ModuleStatus {
     NOT_INSTALLED
 }
 
+enum class RootImplementation(val displayName: String) {
+    MAGISK("Magisk"),
+    KERNELSU("KernelSU"),
+    UNKNOWN("Root"),
+    NONE("Unavailable")
+}
+
+data class RootManagerApp(
+    val packageName: String,
+    val label: String
+)
+
 data class MagiskEnvironment(
     val hasRoot: Boolean,
     val magiskVersion: String,
     val hasResetprop: Boolean,
     val moduleStatus: ModuleStatus,
     val simSlotCount: Int,
-    val installedTikTokPackages: List<TikTokPackageInfo>
+    val installedTikTokPackages: List<TikTokPackageInfo>,
+    val rootImplementation: RootImplementation = RootImplementation.NONE
 )
 
 data class TikTokPackageInfo(
@@ -60,12 +73,14 @@ object MagiskRootManager {
     const val MODULE_ID = "tiktok_region_spoof"
     const val MODULE_DIR = "/data/adb/modules/$MODULE_ID"
 
+    private val ROOT_MANAGER_PACKAGES = listOf(
+        "me.weishu.kernelsu" to "KernelSU",
+        "com.rifsxd.ksunext" to "KernelSU Next",
+        "com.topjohnwu.magisk" to "Magisk"
+    )
+
     private val TIKTOK_TARGETS = listOf(
-        "com.zhiliaoapp.musically" to "TikTok Global",
-        "com.ss.android.ugc.trill" to "TikTok Asia",
-        "com.zhiliaoapp.musically.go" to "TikTok Lite",
-        "com.ss.android.ugc.aweme" to "Douyin",
-        "com.tiktok.business" to "TikTok Business"
+        "com.zhiliaoapp.musically" to "TikTok Global"
     )
 
     suspend fun runSu(script: String): ShellResult = withContext(Dispatchers.IO) {
@@ -87,19 +102,28 @@ object MagiskRootManager {
         }
     }
 
+    private fun isPackageInstalled(pm: PackageManager, pkg: String): Boolean =
+        runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(pkg, 0)
+            }
+            true
+        }.getOrDefault(false)
+
+    fun detectInstalledRootManagers(context: Context): List<RootManagerApp> {
+        val pm = context.packageManager
+        return ROOT_MANAGER_PACKAGES.mapNotNull { (pkg, label) ->
+            if (isPackageInstalled(pm, pkg)) RootManagerApp(pkg, label) else null
+        }
+    }
+
     fun detectInstalledTikTokPackages(context: Context): List<TikTokPackageInfo> {
         val pm = context.packageManager
         return TIKTOK_TARGETS.mapNotNull { (pkg, label) ->
-            val installed = runCatching {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    pm.getPackageInfo(pkg, PackageManager.PackageInfoFlags.of(0))
-                } else {
-                    @Suppress("DEPRECATION")
-                    pm.getPackageInfo(pkg, 0)
-                }
-                true
-            }.getOrDefault(false)
-            if (installed) TikTokPackageInfo(pkg, label) else null
+            if (isPackageInstalled(pm, pkg)) TikTokPackageInfo(pkg, label) else null
         }
     }
 
@@ -108,8 +132,17 @@ object MagiskRootManager {
         val probe = runSu(
             """
             id -u
-            magisk -v 2>/dev/null || echo "none"
-            command -v resetprop >/dev/null 2>&1 && echo "yes" || (magisk --list 2>/dev/null | grep -q resetprop && echo "applet" || echo "no")
+            if command -v ksud >/dev/null 2>&1 || [ -d /data/adb/ksu ]; then
+              echo "KERNELSU"
+              ksud -V 2>/dev/null || su -v 2>/dev/null || echo "KernelSU"
+            elif command -v magisk >/dev/null 2>&1; then
+              echo "MAGISK"
+              magisk -v 2>/dev/null || echo "Magisk"
+            else
+              echo "UNKNOWN"
+              su -v 2>/dev/null || echo "Unknown"
+            fi
+            command -v resetprop >/dev/null 2>&1 && echo "yes" || ([ -x /data/adb/ksu/bin/resetprop ] && echo "yes" || (magisk --list 2>/dev/null | grep -q resetprop && echo "applet" || echo "no"))
             if [ -d "$MODULE_DIR" ]; then
               if [ -f "$MODULE_DIR/disable" ]; then echo "DISABLED"; else echo "ACTIVE"; fi
             else
@@ -120,7 +153,13 @@ object MagiskRootManager {
             getprop persist.radio.multisim.config
             """.trimIndent()
         )
+        return parseEnvironmentProbe(probe, installed)
+    }
 
+    internal fun parseEnvironmentProbe(
+        probe: ShellResult,
+        installedPackages: List<TikTokPackageInfo>
+    ): MagiskEnvironment {
         if (!probe.isSuccess) {
             return MagiskEnvironment(
                 hasRoot = false,
@@ -128,25 +167,31 @@ object MagiskRootManager {
                 hasResetprop = false,
                 moduleStatus = ModuleStatus.NOT_INSTALLED,
                 simSlotCount = 1,
-                installedTikTokPackages = installed
+                installedTikTokPackages = installedPackages,
+                rootImplementation = RootImplementation.NONE
             )
         }
 
         val lines = probe.stdout.lines()
         val uid = lines.getOrNull(0)?.trim()
         val hasRoot = uid == "0"
-        val magiskVer = lines.getOrNull(1)?.trim().orEmpty().ifEmpty { "Unknown" }
-        val resetpropFlag = lines.getOrNull(2)?.trim().orEmpty()
+        val impl = when (lines.getOrNull(1)?.trim()) {
+            "KERNELSU" -> RootImplementation.KERNELSU
+            "MAGISK" -> RootImplementation.MAGISK
+            else -> if (hasRoot) RootImplementation.UNKNOWN else RootImplementation.NONE
+        }
+        val rootVer = lines.getOrNull(2)?.trim().orEmpty().ifEmpty { impl.displayName }
+        val resetpropFlag = lines.getOrNull(3)?.trim().orEmpty()
         val hasResetprop = resetpropFlag == "yes" || resetpropFlag == "applet"
-        val modState = when (lines.getOrNull(3)?.trim()) {
+        val modState = when (lines.getOrNull(4)?.trim()) {
             "ACTIVE" -> ModuleStatus.ACTIVE
             "DISABLED" -> ModuleStatus.DISABLED
             else -> ModuleStatus.NOT_INSTALLED
         }
 
-        val simIsoProp = lines.getOrNull(4)?.trim().orEmpty()
-        val slotProp = lines.getOrNull(5)?.trim()?.toIntOrNull()
-        val multiSimCfg = lines.getOrNull(6)?.trim().orEmpty()
+        val simIsoProp = lines.getOrNull(5)?.trim().orEmpty()
+        val slotProp = lines.getOrNull(6)?.trim()?.toIntOrNull()
+        val multiSimCfg = lines.getOrNull(7)?.trim().orEmpty()
         val slotCount = when {
             simIsoProp.contains(",") -> simIsoProp.split(",").size.coerceIn(1, 2)
             slotProp != null && slotProp > 1 -> slotProp.coerceIn(1, 2)
@@ -156,11 +201,12 @@ object MagiskRootManager {
 
         return MagiskEnvironment(
             hasRoot = hasRoot,
-            magiskVersion = magiskVer,
+            magiskVersion = rootVer,
             hasResetprop = hasResetprop,
             moduleStatus = modState,
             simSlotCount = slotCount,
-            installedTikTokPackages = installed
+            installedTikTokPackages = installedPackages,
+            rootImplementation = impl
         )
     }
 
@@ -202,7 +248,7 @@ object MagiskRootManager {
             }
         }
 
-        val resetpropLookup = "RESETPROP=\$(command -v resetprop || echo 'magisk resetprop')"
+        val resetpropLookup = "RESETPROP=\$(command -v resetprop || ([ -x /data/adb/ksu/bin/resetprop ] && echo '/data/adb/ksu/bin/resetprop') || echo 'magisk resetprop')"
         val propCommands = props.joinToString("\n") { (k, v) ->
             "\$RESETPROP -n ${shQuote(k)} ${shQuote(v)}"
         }
@@ -232,7 +278,7 @@ object MagiskRootManager {
                 version=v1.0.0
                 versionCode=1
                 author=TikTokRegionSpoof
-                description=Spoofs SIM/network telephony properties via Magisk resetprop (${config.simCountryIso.uppercase()} / ${config.simOperatorName})
+                description=Spoofs SIM/network telephony properties via resetprop (${config.simCountryIso.uppercase()} / ${config.simOperatorName})
             """.trimIndent()
 
             val applyPropsSh = buildString {

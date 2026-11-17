@@ -412,11 +412,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         dash.btnOpenMagisk.setOnClickListener {
-            val intent = packageManager.getLaunchIntentForPackage(MAGISK_PACKAGE)
-            if (intent != null) {
-                startActivity(intent)
-            } else {
-                showMessage(getString(R.string.magisk_app_not_found))
+            val launchable = MagiskRootManager.detectInstalledRootManagers(this)
+                .mapNotNull { mgr ->
+                    packageManager.getLaunchIntentForPackage(mgr.packageName)?.let { mgr to it }
+                }
+            when {
+                launchable.isEmpty() -> showMessage(getString(R.string.magisk_app_not_found))
+                launchable.size == 1 -> startActivity(launchable.first().second)
+                else -> {
+                    val labels = launchable.map { it.first.label }.toTypedArray()
+                    MaterialAlertDialogBuilder(this)
+                        .setTitle(R.string.open_magisk_app)
+                        .setItems(labels) { _, which ->
+                            startActivity(launchable[which].second)
+                        }
+                        .show()
+                }
             }
         }
 
@@ -590,9 +601,11 @@ class MainActivity : AppCompatActivity() {
             val env = MagiskRootManager.inspectEnvironment(this@MainActivity)
             currentEnv = env
 
-            dash.tvMagiskStatusTitle.text = getString(
-                if (env.hasRoot) R.string.magisk_root_active_format else R.string.magisk_root_unavailable
-            )
+            dash.tvMagiskStatusTitle.text = if (env.hasRoot) {
+                getString(R.string.magisk_root_active_format, env.rootImplementation.displayName)
+            } else {
+                getString(R.string.magisk_root_unavailable)
+            }
             val cardColorAttr = if (env.hasRoot) {
                 com.google.android.material.R.attr.colorPrimaryContainer
             } else {
@@ -618,6 +631,20 @@ class MainActivity : AppCompatActivity() {
             dash.tvMagiskDetails.visibility = if (env.hasRoot) View.VISIBLE else View.GONE
             dash.tvMagiskGuidance.visibility = missingRootVisibility
             dash.btnOpenMagisk.visibility = missingRootVisibility
+
+            if (!env.hasRoot) {
+                val managers = MagiskRootManager.detectInstalledRootManagers(this@MainActivity)
+                if (managers.isNotEmpty()) {
+                    dash.btnOpenMagisk.text = getString(R.string.open_root_manager_format, managers.first().label)
+                    val isKsu = managers.any { it.packageName.contains("ksu") || it.packageName.contains("kernelsu") }
+                    dash.tvMagiskGuidance.text = getString(
+                        if (isKsu) R.string.kernelsu_grant_guide else R.string.magisk_grant_guide
+                    )
+                } else {
+                    dash.btnOpenMagisk.text = getString(R.string.open_magisk_app)
+                    dash.tvMagiskGuidance.text = getString(R.string.magisk_grant_guide)
+                }
+            }
 
             if (env.hasRoot) {
                 val modText = when (env.moduleStatus) {
@@ -710,7 +737,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
-        private const val MAGISK_PACKAGE = "com.topjohnwu.magisk"
         private const val KEY_ACTIVE_TAB = "active_tab_id"
         private const val KEY_SHELL_LOG = "shell_log"
     }

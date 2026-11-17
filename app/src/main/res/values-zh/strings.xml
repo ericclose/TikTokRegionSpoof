@@ -18,7 +18,7 @@
     <string name="section_persistence_app">持久化与应用操作</string>
     <string name="section_about">使用提示</string>
     <string name="toggle_edit_fields">展开或收起 SIM 与网络属性</string>
-    <string name="checking_magisk_root">正在检测 Magisk Root…</string>
+    <string name="checking_magisk_root">正在检测 Root…</string>
     <string name="refresh">刷新</string>
     <string name="inspecting_magisk_details">正在检测 su、resetprop 与模块状态…</string>
     <string name="target_region_carrier">目标地区</string>
@@ -36,8 +36,8 @@
     <string name="opt_mirror_dual_sim_desc">将伪装值同步镜像到双卡两个卡槽</string>
     <string name="opt_spoof_wifi_country">伪装 Wi-Fi 国家码</string>
     <string name="opt_spoof_wifi_country_desc">通过 cmd wifi 强制设置无线国家码</string>
-    <string name="opt_install_magisk_module">Magisk 模块持久化</string>
-    <string name="opt_install_magisk_module_desc">通过 Magisk 模块持久化，重启后自动生效</string>
+    <string name="opt_install_magisk_module">Root 模块持久化</string>
+    <string name="opt_install_magisk_module_desc">通过 Magisk / KernelSU 模块持久化，重启后自动生效</string>
     <string name="opt_enable_ril_watchdog">启用 RIL 守护进程</string>
     <string name="opt_enable_ril_watchdog_desc">守护地区属性，防止基带或系统自动重置</string>
     <string name="opt_spoof_locale">伪装系统语言区域</string>
@@ -76,11 +76,13 @@
 
     <string name="preset_summary_format">%1$s — %2$s (%3$s)</string>
     <string name="quick_preset_chip_format">%1$s %2$s</string>
-    <string name="magisk_root_active_format">Magisk Root 已激活</string>
+    <string name="magisk_root_active_format">%1$s Root 已激活</string>
     <string name="magisk_root_unavailable">需要 Root 权限</string>
-    <string name="magisk_grant_guide">请在 Magisk → 超级用户中授权后返回。</string>
-    <string name="open_magisk_app">打开 Magisk</string>
-    <string name="magisk_app_not_found">未找到 Magisk 应用（如已隐藏包名，请手动打开并授予超级用户权限）。</string>
+    <string name="magisk_grant_guide">请在 Magisk / KernelSU → 超级用户中授权后返回。</string>
+    <string name="kernelsu_grant_guide">请在 KernelSU → 超级用户中授权（保持 su_compat 开启）后返回。</string>
+    <string name="open_magisk_app">打开 Root 管理器</string>
+    <string name="open_root_manager_format">打开 %1$s</string>
+    <string name="magisk_app_not_found">未找到 Root 管理器（如已隐藏包名，请手动打开 Magisk 或 KernelSU 并授予超级用户权限）。</string>
     <string name="magisk_details_format">%1$s  ·  %2$d 卡槽  ·  模块: %3$s</string>
     <string name="module_active">已激活</string>
     <string name="module_disabled">已禁用</string>
@@ -92,18 +94,18 @@
 
     <string name="err_iso_format">请输入 2 位 ISO 码（如 gb）</string>
     <string name="err_mccmnc_format">请输入 5–6 位数字</string>
-    <string name="msg_root_required">需要 Magisk Root (su) 权限，当前未授权。</string>
-    <string name="msg_applied_format">已通过 Magisk resetprop 应用（%1$s）。</string>
+    <string name="msg_root_required">需要 Root (su) 权限，当前未授权。</string>
+    <string name="msg_applied_format">已通过 resetprop 应用（%1$s）。</string>
     <string name="msg_apply_failed_format">执行失败（退出码 %1$d），点击「Root 日志」查看详情。</string>
-    <string name="msg_restored">Magisk 模块已移除，重启设备后将恢复原始基带属性。</string>
+    <string name="msg_restored">伪装模块已移除，重启设备后将恢复原始基带属性。</string>
     <string name="msg_restore_failed">恢复失败，点击「Root 日志」查看详情。</string>
-    <string name="dialog_root_log_title">Magisk Root 执行日志</string>
+    <string name="dialog_root_log_title">Root 执行日志</string>
     <string name="no_root_commands_yet">尚未执行任何 Root 命令。</string>
     <string name="action_copy">复制</string>
     <string name="action_close">关闭</string>
     <string name="action_launch">立即启动</string>
     <string name="confirm_restore_title">恢复默认设置？</string>
-    <string name="confirm_restore_message">将移除 Magisk 伪装模块并强行停止 TikTok。部分基带属性需重启设备后完全恢复。</string>
+    <string name="confirm_restore_message">将移除伪装模块并强行停止 TikTok。部分基带属性需重启设备后完全恢复。</string>
     <string name="action_restore">确认恢复</string>
     <string name="action_cancel">取消</string>
     <string name="msg_log_copied">日志已复制到剪贴板。</string>

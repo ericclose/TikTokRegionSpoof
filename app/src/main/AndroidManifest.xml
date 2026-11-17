@@ -3,11 +3,9 @@
 
     <queries>
         <package android:name="com.topjohnwu.magisk" />
+        <package android:name="me.weishu.kernelsu" />
+        <package android:name="com.rifsxd.ksunext" />
         <package android:name="com.zhiliaoapp.musically" />
-        <package android:name="com.ss.android.ugc.trill" />
-        <package android:name="com.zhiliaoapp.musically.go" />
-        <package android:name="com.ss.android.ugc.aweme" />
-        <package android:name="com.tiktok.business" />
     </queries>
 
     <application
