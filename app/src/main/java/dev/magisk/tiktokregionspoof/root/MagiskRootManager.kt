@@ -214,7 +214,13 @@ object MagiskRootManager {
         config: SpoofConfig,
         slotCount: Int,
         installedPackages: List<TikTokPackageInfo>
-    ): ShellResult {
+    ): ShellResult = runSu(buildApplyScript(config, slotCount, installedPackages))
+
+    internal fun buildApplyScript(
+        config: SpoofConfig,
+        slotCount: Int,
+        installedPackages: List<TikTokPackageInfo>
+    ): String {
         val slots = if (config.mirrorDualSim && slotCount > 1) slotCount else 1
 
         val simIso = formatSlotValue(config.simCountryIso.lowercase().trim(), slots)
@@ -250,7 +256,7 @@ object MagiskRootManager {
 
         val resetpropLookup = "RESETPROP=\$(command -v resetprop || ([ -x /data/adb/ksu/bin/resetprop ] && echo '/data/adb/ksu/bin/resetprop') || echo 'magisk resetprop')"
         val propCommands = props.joinToString("\n") { (k, v) ->
-            "\$RESETPROP -n ${shQuote(k)} ${shQuote(v)}"
+            "\$RESETPROP -n ${shQuote(k)} ${shQuote(v)} || PROP_FAILED=1"
         }
         val wifiLine = if (config.spoofWifiCountry && config.simCountryIso.length == 2) {
             "cmd wifi force-country-code enabled ${shQuote(config.simCountryIso.uppercase())} >/dev/null 2>&1 || true"
@@ -260,6 +266,7 @@ object MagiskRootManager {
 
         val sb = StringBuilder()
         sb.appendLine(resetpropLookup)
+        sb.appendLine("APPLY_STATUS=0")
         sb.appendLine("if [ -f ${shQuote("$MODULE_DIR/guard.pid")} ]; then")
         sb.appendLine("  kill \$(cat ${shQuote("$MODULE_DIR/guard.pid")}) >/dev/null 2>&1 || true")
         sb.appendLine("  rm -f ${shQuote("$MODULE_DIR/guard.pid")}")
@@ -284,8 +291,10 @@ object MagiskRootManager {
             val applyPropsSh = buildString {
                 appendLine("#!/system/bin/sh")
                 appendLine(resetpropLookup)
+                appendLine("PROP_FAILED=0")
                 appendLine(propCommands)
                 if (wifiLine.isNotEmpty()) appendLine(wifiLine)
+                appendLine("exit \"\$PROP_FAILED\"")
             }.trimEnd()
 
             val guardScriptContent = """
@@ -335,13 +344,15 @@ object MagiskRootManager {
             sb.appendLine("EOF_SVC")
             sb.appendLine("chmod 0644 ${shQuote("$MODULE_DIR/module.prop")} ${shQuote("$MODULE_DIR/system.prop")}")
             sb.appendLine("chmod 0755 ${shQuote("$MODULE_DIR/apply_props.sh")} ${shQuote("$MODULE_DIR/guard.sh")} ${shQuote("$MODULE_DIR/service.sh")}")
-            sb.appendLine("sh ${shQuote("$MODULE_DIR/apply_props.sh")}")
+            sb.appendLine("sh ${shQuote("$MODULE_DIR/apply_props.sh")} || APPLY_STATUS=1")
 
             if (config.rilGuardLoop) {
                 sb.appendLine("nohup sh ${shQuote("$MODULE_DIR/guard.sh")} >/dev/null 2>&1 &")
             }
         } else {
+            sb.appendLine("PROP_FAILED=0")
             sb.appendLine(propCommands)
+            sb.appendLine("if [ \"\$PROP_FAILED\" -ne 0 ]; then APPLY_STATUS=1; fi")
             if (wifiLine.isNotEmpty()) sb.appendLine(wifiLine)
         }
 
@@ -349,15 +360,22 @@ object MagiskRootManager {
             for (pkg in installedPackages) {
                 sb.appendLine("am force-stop ${shQuote(pkg.packageName)} >/dev/null 2>&1 || true")
                 if (config.clearTikTokCache) {
-                    sb.appendLine("rm -rf '/data/user/0/${pkg.packageName}/cache'/* '/data/user/0/${pkg.packageName}/code_cache'/* >/dev/null 2>&1 || true")
+                    val pkgDataDir = listOf("", "data", "user", "0", pkg.packageName).joinToString("/")
+                    val cacheDir = shQuote("$pkgDataDir/cache")
+                    val codeCacheDir = shQuote("$pkgDataDir/code_cache")
+                    sb.appendLine("rm -rf $cacheDir/* $codeCacheDir/* >/dev/null 2>&1 || true")
                 }
             }
         }
 
-        return runSu(sb.toString())
+        sb.appendLine("exit \"\$APPLY_STATUS\"")
+        return sb.toString()
     }
 
-    suspend fun restoreDefaults(installedPackages: List<TikTokPackageInfo>): ShellResult {
+    suspend fun restoreDefaults(installedPackages: List<TikTokPackageInfo>): ShellResult =
+        runSu(buildRestoreScript(installedPackages))
+
+    internal fun buildRestoreScript(installedPackages: List<TikTokPackageInfo>): String {
         val sb = StringBuilder()
         sb.appendLine("if [ -f ${shQuote("$MODULE_DIR/guard.pid")} ]; then")
         sb.appendLine("  kill \$(cat ${shQuote("$MODULE_DIR/guard.pid")}) >/dev/null 2>&1 || true")
@@ -368,7 +386,7 @@ object MagiskRootManager {
         for (pkg in installedPackages) {
             sb.appendLine("am force-stop ${shQuote(pkg.packageName)} >/dev/null 2>&1 || true")
         }
-        return runSu(sb.toString())
+        return sb.toString()
     }
 
     suspend fun readLiveDiagnostics(context: Context): LiveDiagnostics {

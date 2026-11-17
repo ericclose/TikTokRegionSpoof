@@ -1,9 +1,11 @@
 package dev.magisk.tiktokregionspoof
 
+import dev.magisk.tiktokregionspoof.model.SpoofConfig
 import dev.magisk.tiktokregionspoof.root.MagiskRootManager
 import dev.magisk.tiktokregionspoof.root.ModuleStatus
 import dev.magisk.tiktokregionspoof.root.RootImplementation
 import dev.magisk.tiktokregionspoof.root.ShellResult
+import dev.magisk.tiktokregionspoof.root.TikTokPackageInfo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -88,5 +90,55 @@ class MagiskRootManagerTest {
         assertFalse(env.hasRoot)
         assertEquals(RootImplementation.NONE, env.rootImplementation)
         assertEquals("Unavailable", env.magiskVersion)
+    }
+
+    @Test
+    fun buildApplyScript_tracksPropFailuresAndQuotesCachePaths() {
+        val config = SpoofConfig(
+            persistMagiskModule = true,
+            rilGuardLoop = true,
+            spoofLocale = true,
+            localeTag = "en-GB",
+            spoofTimezone = true,
+            timezoneId = "Europe/London",
+            forceStopTikTok = true,
+            clearTikTokCache = true
+        )
+        val packages = listOf(TikTokPackageInfo("com.zhiliaoapp.musically", "TikTok Global"))
+        val script = MagiskRootManager.buildApplyScript(config, slotCount = 2, installedPackages = packages)
+
+        assertTrue(script.contains("APPLY_STATUS=0"))
+        assertTrue(script.contains("PROP_FAILED=0"))
+        assertTrue(script.contains("|| PROP_FAILED=1"))
+        assertTrue(script.contains("exit \"\$APPLY_STATUS\""))
+        assertTrue(script.contains("'/data/user/0/com.zhiliaoapp.musically/cache'/*"))
+        assertTrue(script.contains("'/data/user/0/com.zhiliaoapp.musically/code_cache'/*"))
+        assertTrue(script.contains("guard.sh"))
+        assertTrue(script.contains("persist.sys.locale"))
+        assertTrue(script.contains("persist.sys.timezone"))
+    }
+
+    @Test
+    fun buildApplyScript_nonPersistentTracksPropFailure() {
+        val config = SpoofConfig(
+            persistMagiskModule = false,
+            rilGuardLoop = false,
+            forceStopTikTok = true
+        )
+        val packages = listOf(TikTokPackageInfo("com.zhiliaoapp.musically", "TikTok Global"))
+        val script = MagiskRootManager.buildApplyScript(config, slotCount = 1, installedPackages = packages)
+
+        assertFalse(script.contains("EOF_MODPROP"))
+        assertTrue(script.contains("if [ \"\$PROP_FAILED\" -ne 0 ]; then APPLY_STATUS=1; fi"))
+        assertTrue(script.contains("exit \"\$APPLY_STATUS\""))
+    }
+
+    @Test
+    fun buildRestoreScript_removesModuleAndStopsTarget() {
+        val packages = listOf(TikTokPackageInfo("com.zhiliaoapp.musically", "TikTok Global"))
+        val script = MagiskRootManager.buildRestoreScript(packages)
+
+        assertTrue(script.contains("rm -rf '/data/adb/modules/tiktok_region_spoof'"))
+        assertTrue(script.contains("am force-stop 'com.zhiliaoapp.musically'"))
     }
 }

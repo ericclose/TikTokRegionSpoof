@@ -483,6 +483,11 @@ class MainActivity : AppCompatActivity() {
                     showMessage(getString(R.string.msg_root_required))
                     return@launch
                 }
+                if (!env.hasResetprop) {
+                    setActionsEnabled(true)
+                    showMessage(getString(R.string.resetprop_missing_guide))
+                    return@launch
+                }
                 val result = MagiskRootManager.applySpoof(
                     config = cfg,
                     slotCount = env.simSlotCount,
@@ -559,19 +564,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun launchTikTokFlow() {
-        val installed = currentEnv?.installedTikTokPackages.orEmpty()
-        when {
-            installed.isEmpty() -> showMessage(getString(R.string.msg_no_tiktok))
-            installed.size == 1 -> launchPackage(installed.first().packageName)
-            else -> {
-                val labels = installed.map { it.label }.toTypedArray()
-                MaterialAlertDialogBuilder(this)
-                    .setTitle(R.string.launch_tiktok)
-                    .setItems(labels) { _, which ->
-                        launchPackage(installed[which].packageName)
-                    }
-                    .show()
-            }
+        val target = currentEnv?.installedTikTokPackages?.firstOrNull()
+        if (target == null) {
+            showMessage(getString(R.string.msg_no_tiktok))
+        } else {
+            launchPackage(target.packageName)
         }
     }
 
