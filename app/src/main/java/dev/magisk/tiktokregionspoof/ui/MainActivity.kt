@@ -644,6 +644,9 @@ class MainActivity : AppCompatActivity() {
                     dash.btnOpenMagisk.text = getString(R.string.open_magisk_app)
                     dash.tvMagiskGuidance.text = getString(R.string.magisk_grant_guide)
                 }
+            } else if (!env.hasResetprop) {
+                dash.tvMagiskGuidance.visibility = View.VISIBLE
+                dash.tvMagiskGuidance.setText(R.string.resetprop_missing_guide)
             }
 
             if (env.hasRoot) {

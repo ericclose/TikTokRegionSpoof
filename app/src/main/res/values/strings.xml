@@ -84,11 +84,12 @@
     <string name="open_magisk_app">Open Root Manager</string>
     <string name="open_root_manager_format">Open %1$s</string>
     <string name="magisk_app_not_found">Root manager app not found (if hidden/repackaged, open Magisk or KernelSU manually and grant Superuser).</string>
+    <string name="resetprop_missing_guide">resetprop not found. Ensure Magisk or KernelSU is properly installed.</string>
     <string name="magisk_details_format">%1$s  ·  %2$d SIM  ·  Module: %3$s</string>
     <string name="module_active">Active</string>
     <string name="module_disabled">Disabled</string>
     <string name="module_not_installed">Not Installed</string>
-    <string name="no_tiktok_detected">No TikTok packages detected</string>
+    <string name="no_tiktok_detected">TikTok Global not detected</string>
     <string name="diag_effective_format">Effective: System reports %1$s</string>
     <string name="diag_overridden_format">Properties set to %1$s, but system still reports \u0027%2$s\u0027 (physical SIM override). Enable Airplane Mode + Wi-Fi or disable the SIM slot.</string>
     <string name="diag_not_spoofed_format">Not spoofed to %1$s yet (prop=%2$s, sys=%3$s).</string>
@@ -110,6 +111,6 @@
     <string name="action_restore">Restore</string>
     <string name="action_cancel">Cancel</string>
     <string name="msg_log_copied">Log copied to clipboard.</string>
-    <string name="msg_no_tiktok">No TikTok packages installed.</string>
+    <string name="msg_no_tiktok">TikTok Global is not installed.</string>
     <string name="msg_unable_launch_format">Unable to launch %1$s</string>
 </resources>
